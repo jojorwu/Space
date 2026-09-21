@@ -188,5 +188,30 @@ impl ScriptEngine {
     ) -> Result<HashMap<String, crate::ai::personality::AiPersonality>> {
         crate::ai::personality::PersonalityLoader::load_from_lua(&self.lua, path)
     }
+
+    /// Modding Engine API: Dynamically loads and merges all `.lua` mod files inside a specified `mods/` directory
+    pub fn load_mods_from_dir<P: AsRef<Path>>(&self, mods_dir: P) -> Result<usize> {
+        let path = mods_dir.as_ref();
+        if !path.exists() || !path.is_dir() {
+            return Ok(0);
+        }
+
+        let entries = std::fs::read_dir(path)
+            .map_err(|e| mlua::Error::RuntimeError(format!("Failed to read mods directory: {}", e)))?;
+
+        let mut loaded_count = 0;
+        for entry in entries.flatten() {
+            let file_path = entry.path();
+            if file_path.is_file() && file_path.extension().and_then(|s| s.to_str()) == Some("lua") {
+                let content = std::fs::read_to_string(&file_path)
+                    .map_err(|e| mlua::Error::RuntimeError(format!("Failed to read mod file {:?}: {}", file_path, e)))?;
+                let clean_content = content.trim_start_matches('\u{feff}');
+                self.lua.load(clean_content).exec()?;
+                loaded_count += 1;
+            }
+        }
+
+        Ok(loaded_count)
+    }
 }
 
