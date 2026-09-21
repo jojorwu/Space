@@ -11,6 +11,7 @@ impl StrategicAi {
     pub fn pick_colonization_target(
         faction: &Faction,
         personality: &AiPersonality,
+        brain: Option<&crate::ai::brain::AiBrain>,
         galaxy: &Galaxy,
         spatial: &SpatialIndex,
     ) -> Option<(usize, f32)> {
@@ -20,6 +21,8 @@ impl StrategicAi {
 
         let mut best_target = None;
         let mut best_score = 0.0f32;
+
+        let risk_tolerance = brain.map_or(personality.risk_tolerance, |b| b.effective_risk_tolerance(personality));
 
         for planet in &galaxy.planets {
             if planet.owner_faction.is_some() {
@@ -47,8 +50,11 @@ impl StrategicAi {
             };
 
             let pop_value = (planet.population_millions as f32).clamp(10.0, 500.0) / 100.0;
-            // Utility: High value, close proximity, personality expansionism
-            let score = ((type_value * pop_value) / (min_dist + 40.0)) * personality.expansionism;
+            let danger = brain.map_or(0.0, |b| b.get_danger(planet.id));
+
+            // Utility: High value, low danger, close proximity, personality expansionism
+            let danger_penalty = 1.0 + (danger / (risk_tolerance + 0.1));
+            let score = (((type_value * pop_value) / (min_dist + 40.0)) * personality.expansionism) / danger_penalty;
 
             if score > best_score {
                 best_score = score;
@@ -63,6 +69,7 @@ impl StrategicAi {
     pub fn pick_invasion_target(
         faction: &Faction,
         personality: &AiPersonality,
+        brain: Option<&crate::ai::brain::AiBrain>,
         galaxy: &Galaxy,
         spatial: &SpatialIndex,
         factions: &FactionManager,
@@ -90,6 +97,8 @@ impl StrategicAi {
                 continue;
             }
 
+            let eff_aggression = brain.map_or(personality.aggression, |b| b.effective_aggression(personality, Some(other_id)));
+
             for &enemy_planet_id in &other_faction.controlled_planets {
                 let enemy_planet = match galaxy.get_planet(enemy_planet_id) {
                     Some(p) => p,
@@ -110,7 +119,7 @@ impl StrategicAi {
                 let vulnerability = 300.0 / (enemy_planet.planetary_defense + 30.0);
                 let strategic_value = (enemy_planet.population_millions as f32).clamp(20.0, 1000.0) / 100.0;
 
-                let score = ((strategic_value * vulnerability) / (min_dist + 50.0)) * personality.aggression;
+                let score = ((strategic_value * vulnerability) / (min_dist + 50.0)) * eff_aggression;
 
                 if score > best_score {
                     best_score = score;
@@ -127,8 +136,10 @@ impl StrategicAi {
         faction_id: &str,
         faction: &mut Faction,
         personality: &AiPersonality,
+        mut brain: Option<&mut crate::ai::brain::AiBrain>,
         active_fleets: &mut Vec<crate::factions::FactionFleet>,
         galaxy: &Galaxy,
+        cycle: usize,
     ) -> Vec<GameEvent> {
         let mut events = Vec::new();
 
@@ -147,10 +158,14 @@ impl StrategicAi {
                 // Is this armada targeting one of our planets?
                 if faction.controlled_planets.contains(&fleet.target_planet) {
                     // Decide whether to launch an interception sortie
+                    let chance = brain.as_ref().map_or(personality.interception_chance, |b| {
+                        (personality.interception_chance * b.effective_defense_bias(personality)).clamp(0.1, 0.95)
+                    });
                     let roll: f32 = rand::random();
-                    if roll <= personality.interception_chance {
+                    if roll <= chance {
                         let intercept_cost = 5000.0;
-                        let patrol_power = 120.0 * personality.defense_bias;
+                        let def_bias = brain.as_ref().map_or(personality.defense_bias, |b| b.effective_defense_bias(personality));
+                        let patrol_power = 120.0 * def_bias;
 
                         faction.treasury -= intercept_cost;
                         faction.military_power -= 30.0;
@@ -161,6 +176,13 @@ impl StrategicAi {
                         let defender_won = patrol_power >= firepower * 0.75;
                         if defender_won {
                             intercepted_indices.push(idx);
+                            if let Some(ref mut b) = brain {
+                                b.record_combat_victory(fleet.target_planet, &enemy_name, cycle);
+                            }
+                        } else {
+                            if let Some(ref mut b) = brain {
+                                b.record_combat_loss(fleet.target_planet, 2, &enemy_name, cycle);
+                            }
                         }
 
                         events.push(GameEvent::FleetIntercepted {

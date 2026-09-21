@@ -24,7 +24,7 @@ pub struct TraderAi;
 
 impl TraderAi {
     /// Evaluates all feasible trade routes from `current_planet` within `jump_range`
-    /// using the O(1) SpatialIndex and multi-factor Utility scoring.
+    /// using the O(1) SpatialIndex, cognitive brain threat awareness, and multi-factor Utility scoring.
     pub fn select_best_route(
         trader: &TraderShip,
         archetype: TraderArchetype,
@@ -33,6 +33,7 @@ impl TraderAi {
         items: &HashMap<String, ItemDef>,
         jump_range: f32,
         in_flight: &HashMap<(usize, String), f64>,
+        brain: Option<&crate::ai::brain::AiBrain>,
     ) -> Option<RouteCandidate> {
         let cur_id = trader.current_planet;
         let cur_planet = galaxy.get_planet(cur_id)?;
@@ -51,14 +52,15 @@ impl TraderAi {
                 None => continue,
             };
 
-            // Calculate zone danger & war risk
+            // Calculate zone danger & war risk + brain system danger perception
             let base_risk: f32 = match dest_planet.zone {
                 ZoneType::Core => 0.05,
                 ZoneType::Neutral => 0.20,
                 ZoneType::Frontier => 0.50,
             };
+            let danger_memory = brain.map_or(0.0, |b| b.get_danger(dest_id));
             let war_risk: f32 = if dest_planet.planetary_defense < dest_planet.max_defense { 0.35 } else { 0.0 };
-            let total_risk: f32 = base_risk + war_risk;
+            let total_risk: f32 = base_risk + war_risk + (danger_memory * 0.2);
 
             // Risk penalty according to archetype
             let risk_multiplier: f32 = match archetype {

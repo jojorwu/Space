@@ -2,8 +2,10 @@ use std::collections::HashMap;
 use glam::Vec2;
 use rand::Rng;
 
+use crate::ai::brain::AiBrain;
 use crate::ai::personality::AiPersonality;
 use crate::ai::strategic_ai::StrategicAi;
+use crate::ai::tactical_ai::TacticalAi;
 use crate::ai::trader_ai::{TraderAi, TraderArchetype};
 use crate::factions::{FactionFleet, FactionManager, FleetMission};
 use crate::galaxy::Galaxy;
@@ -17,6 +19,7 @@ pub struct GalacticWorld {
     pub spatial: SpatialIndex,
     pub factions: FactionManager,
     pub personalities: HashMap<String, AiPersonality>,
+    pub brains: HashMap<String, AiBrain>,
     pub traders: TradeFleet,
     pub in_flight_cargo: HashMap<(usize, String), f64>,
     pub event_bus: EventBus,
@@ -37,11 +40,17 @@ impl GalacticWorld {
         let spatial = SpatialIndex::build(&positions);
         let event_bus = EventBus::new(30);
 
+        let mut brains = HashMap::new();
+        for f_id in factions.factions.keys() {
+            brains.insert(f_id.clone(), AiBrain::new(f_id));
+        }
+
         Self {
             galaxy,
             spatial,
             factions,
             personalities,
+            brains,
             traders,
             in_flight_cargo: HashMap::new(),
             event_bus,
@@ -53,6 +62,11 @@ impl GalacticWorld {
     /// Primary simulation cycle: updates economy, AI agents, diplomacy, fleets, and wars
     pub fn tick<R: Rng>(&mut self, rng: &mut R) {
         self.cycle_count += 1;
+
+        // 0. Decay cognitive brains
+        for brain in self.brains.values_mut() {
+            brain.decay(self.cycle_count);
+        }
 
         // 1. Economic Production & Consumption on all 100 planets
         self.galaxy.tick_economy();
@@ -128,6 +142,7 @@ impl GalacticWorld {
                     &self.items,
                     jump_range,
                     &self.in_flight_cargo,
+                    None,
                 ) {
                     let cur_id = ship.current_planet;
                     if let Some(cur_planet) = self.galaxy.get_planet_mut(cur_id) {
@@ -149,13 +164,17 @@ impl GalacticWorld {
         let faction_ids: Vec<String> = self.factions.factions.keys().cloned().collect();
         for f_id in &faction_ids {
             let personality = self.get_personality(f_id);
+            let brain = self.brains.get_mut(f_id);
+            let cycle = self.cycle_count;
             if let Some(faction) = self.factions.factions.get_mut(f_id) {
                 let events = StrategicAi::check_interception_opportunities(
                     f_id,
                     faction,
                     &personality,
+                    brain,
                     &mut self.factions.active_fleets,
                     &self.galaxy,
+                    cycle,
                 );
                 for ev in events {
                     self.event_bus.push(ev);
@@ -179,6 +198,7 @@ impl GalacticWorld {
         // 2. High-level strategic targeting via StrategicAi
         for f_id in &faction_ids {
             let personality = self.get_personality(f_id);
+            let brain = self.brains.get(f_id).cloned();
             let faction = match self.factions.factions.get(f_id) {
                 Some(f) if f.treasury >= 12000.0 && !f.controlled_planets.is_empty() => f.clone(),
                 _ => continue,
@@ -191,6 +211,7 @@ impl GalacticWorld {
                 if let Some((target_id, _score)) = StrategicAi::pick_colonization_target(
                     &faction,
                     &personality,
+                    brain.as_ref(),
                     &self.galaxy,
                     &self.spatial,
                 ) {
@@ -198,6 +219,7 @@ impl GalacticWorld {
                     if let Some(f_mut) = self.factions.factions.get_mut(f_id) {
                         f_mut.treasury -= cost;
                     }
+                    let doctrine = TacticalAi::choose_combat_doctrine(&personality, brain.as_ref(), "SiegeArmada");
                     let fleet = FactionFleet {
                         id: self.factions.next_fleet_id,
                         owner_faction: f_id.clone(),
@@ -208,6 +230,9 @@ impl GalacticWorld {
                         mission: FleetMission::Colonization {
                             colony_supplies: 120.0,
                         },
+                        role: crate::factions::TaskForceRole::SiegeArmada,
+                        doctrine,
+                        supplies: 100.0,
                     };
                     self.factions.next_fleet_id += 1;
                     self.factions.active_fleets.push(fleet);
@@ -216,20 +241,23 @@ impl GalacticWorld {
             }
 
             // Consider Invasion
-            if faction.military_power >= 200.0 && rng.gen_bool((0.40 * personality.aggression as f64).clamp(0.1, 0.8)) {
+            let eff_aggression = brain.as_ref().map_or(personality.aggression, |b| b.effective_aggression(&personality, None));
+            if faction.military_power >= 200.0 && rng.gen_bool((0.40 * eff_aggression as f64).clamp(0.1, 0.8)) {
                 if let Some((target_id, _score)) = StrategicAi::pick_invasion_target(
                     &faction,
                     &personality,
+                    brain.as_ref(),
                     &self.galaxy,
                     &self.spatial,
                     &self.factions,
                 ) {
                     let cost = 14000.0;
-                    let firepower = 190.0 * personality.aggression;
+                    let firepower = 190.0 * eff_aggression;
                     if let Some(f_mut) = self.factions.factions.get_mut(f_id) {
                         f_mut.treasury -= cost;
                         f_mut.military_power -= 40.0;
                     }
+                    let doctrine = TacticalAi::choose_combat_doctrine(&personality, brain.as_ref(), "SiegeArmada");
                     let fleet = FactionFleet {
                         id: self.factions.next_fleet_id,
                         owner_faction: f_id.clone(),
@@ -238,6 +266,9 @@ impl GalacticWorld {
                         progress: 0.0,
                         speed: 32.0,
                         mission: FleetMission::MilitaryInvasion { firepower },
+                        role: crate::factions::TaskForceRole::SiegeArmada,
+                        doctrine,
+                        supplies: 100.0,
                     };
                     self.factions.next_fleet_id += 1;
                     self.factions.active_fleets.push(fleet);
