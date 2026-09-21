@@ -102,10 +102,20 @@ impl GalaxyRenderer {
     ) {
         clear_background(Color::new(0.02, 0.03, 0.06, 1.0));
 
-        // 1. Draw Cosmic Deep Space Nebulae
+        let sw = screen_width();
+        let sh = screen_height();
+
+        // 1. Draw Cosmic Deep Space Nebulae (Frustum Culled!)
         for neb in &self.nebulae {
             let s_pos = camera.world_to_screen(neb.position);
             let s_rad = neb.radius * camera.zoom;
+
+            if s_pos.x + s_rad < -100.0 || s_pos.x - s_rad > sw + 100.0
+                || s_pos.y + s_rad < -100.0 || s_pos.y - s_rad > sh + 100.0
+            {
+                continue;
+            }
+
             // Draw soft layered gradients
             for layer in (1..=4).rev() {
                 let factor = layer as f32 / 4.0;
@@ -158,12 +168,17 @@ impl GalaxyRenderer {
                     let ship_world = from_world.lerp(to_world, trader.travel_progress);
                     let ship_screen = camera.world_to_screen(ship_world);
 
-                    // Emit engine exhaust particles in world space
-                    let travel_dir = (to_world - from_world).normalize_or_zero();
-                    particles.emit_engine_trail(ship_world, travel_dir, Color::new(0.2, 0.8, 1.0, 0.8), 25.0);
+                    // Frustum culling check
+                    if ship_screen.x >= -20.0 && ship_screen.x <= sw + 20.0
+                        && ship_screen.y >= -20.0 && ship_screen.y <= sh + 20.0
+                    {
+                        // Emit engine exhaust particles in world space
+                        let travel_dir = (to_world - from_world).normalize_or_zero();
+                        particles.emit_engine_trail(ship_world, travel_dir, Color::new(0.2, 0.8, 1.0, 0.8), 25.0);
 
-                    // Draw trader vessel
-                    draw_circle(ship_screen.x, ship_screen.y, 4.2 * camera.zoom.clamp(0.8, 1.8), Color::new(0.3, 1.0, 0.5, 0.95));
+                        // Draw trader vessel
+                        draw_circle(ship_screen.x, ship_screen.y, 4.2 * camera.zoom.clamp(0.8, 1.8), Color::new(0.3, 1.0, 0.5, 0.95));
+                    }
                 }
             }
         }

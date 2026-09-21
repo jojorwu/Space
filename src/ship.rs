@@ -213,6 +213,27 @@ impl ShipGrid {
         detached_chunks
     }
 
+    /// Physics step integration: update linear position and rotation based on velocities & inertia
+    pub fn update_physics(&mut self, dt: f32) {
+        if dt <= 0.0 {
+            return;
+        }
+
+        // Integrate linear position
+        self.world_position += self.velocity * dt;
+
+        // Integrate rotation and apply angular damping based on inertia
+        self.rotation += self.angular_velocity * dt;
+        // Normalize rotation to [0, 2PI)
+        self.rotation = self.rotation.rem_euclid(std::f32::consts::TAU);
+
+        let damping = (1.0 - 0.5 * dt).clamp(0.0, 1.0);
+        self.angular_velocity *= damping;
+        if self.angular_velocity.abs() < 1e-6 {
+            self.angular_velocity = 0.0;
+        }
+    }
+
     /// Convert local ship coordinates to world coordinates
     pub fn local_to_world(&self, local_pos: Vec2) -> Vec2 {
         let cos_r = self.rotation.cos();
