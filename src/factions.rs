@@ -184,6 +184,41 @@ pub struct FactionFleet {
     pub supplies: f32,
 }
 
+impl FactionFleet {
+    pub fn new(
+        id: u64,
+        owner_faction: String,
+        origin_planet: usize,
+        target_planet: usize,
+        speed: f32,
+        mission: FleetMission,
+    ) -> Self {
+        let (role, doctrine) = match &mission {
+            FleetMission::Colonization { .. } => (
+                TaskForceRole::SiegeArmada,
+                crate::sim::combat::CombatDoctrine::ScreenEscort,
+            ),
+            FleetMission::MilitaryInvasion { .. } => (
+                TaskForceRole::SiegeArmada,
+                crate::sim::combat::CombatDoctrine::BrawlingAssault,
+            ),
+        };
+
+        Self {
+            id,
+            owner_faction,
+            origin_planet,
+            target_planet,
+            progress: 0.0,
+            speed,
+            mission,
+            role,
+            doctrine,
+            supplies: 100.0,
+        }
+    }
+}
+
 pub struct FactionManager {
     pub factions: HashMap<String, Faction>,
     pub diplomacy: DiplomacyMatrix,
