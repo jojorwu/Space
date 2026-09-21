@@ -198,17 +198,16 @@ impl GalacticWorld {
                     if let Some(f_mut) = self.factions.factions.get_mut(f_id) {
                         f_mut.treasury -= cost;
                     }
-                    let fleet = FactionFleet {
-                        id: self.factions.next_fleet_id,
-                        owner_faction: f_id.clone(),
+                    let fleet = FactionFleet::new(
+                        self.factions.next_fleet_id,
+                        f_id.clone(),
                         origin_planet,
-                        target_planet: target_id,
-                        progress: 0.0,
-                        speed: 38.0,
-                        mission: FleetMission::Colonization {
+                        target_id,
+                        38.0,
+                        FleetMission::Colonization {
                             colony_supplies: 120.0,
                         },
-                    };
+                    );
                     self.factions.next_fleet_id += 1;
                     self.factions.active_fleets.push(fleet);
                     continue;
@@ -230,15 +229,14 @@ impl GalacticWorld {
                         f_mut.treasury -= cost;
                         f_mut.military_power -= 40.0;
                     }
-                    let fleet = FactionFleet {
-                        id: self.factions.next_fleet_id,
-                        owner_faction: f_id.clone(),
+                    let fleet = FactionFleet::new(
+                        self.factions.next_fleet_id,
+                        f_id.clone(),
                         origin_planet,
-                        target_planet: target_id,
-                        progress: 0.0,
-                        speed: 32.0,
-                        mission: FleetMission::MilitaryInvasion { firepower },
-                    };
+                        target_id,
+                        32.0,
+                        FleetMission::MilitaryInvasion { firepower },
+                    );
                     self.factions.next_fleet_id += 1;
                     self.factions.active_fleets.push(fleet);
                 }

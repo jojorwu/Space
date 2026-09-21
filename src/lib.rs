@@ -144,15 +144,16 @@ mod tests {
         let p_id = indep_planet.id;
 
         // Manually dispatch a colonization fleet
-        faction_mgr.active_fleets.push(factions::FactionFleet {
-            id: 999,
-            owner_faction: faction_a.clone(),
-            origin_planet: p_id,
-            target_planet: p_id,
-            progress: 1.0, // Instantly arrive
-            speed: 100.0,
-            mission: factions::FleetMission::Colonization { colony_supplies: 150.0 },
-        });
+        let mut test_fleet = factions::FactionFleet::new(
+            999,
+            faction_a.clone(),
+            p_id,
+            p_id,
+            100.0,
+            factions::FleetMission::Colonization { colony_supplies: 150.0 },
+        );
+        test_fleet.progress = 1.0; // Instantly arrive
+        faction_mgr.active_fleets.push(test_fleet);
 
         let events = faction_mgr.tick_strategic_turn(&mut rng, &mut galaxy);
         let claimed_planet = galaxy.get_planet(p_id).unwrap();

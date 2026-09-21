@@ -440,3 +440,16 @@ impl TacticalCombatResolver {
         total_dmg_dealt
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_combat_doctrine_methods() {
+        assert_eq!(CombatDoctrine::default(), CombatDoctrine::ScreenEscort);
+        assert_eq!(CombatDoctrine::ScreenEscort.name(), "Screening Escort");
+        assert_eq!(CombatDoctrine::BrawlingAssault.retreat_threshold(), 0.20);
+        assert_eq!(CombatDoctrine::KitingSniper.retreat_threshold(), 0.65);
+    }
+}
