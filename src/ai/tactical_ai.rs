@@ -4,19 +4,27 @@ use crate::sim::combat::{CombatDoctrine, ShipClass, TacticalFleet, TargetSystem}
 pub struct TacticalAi;
 
 impl TacticalAi {
-    /// Selects the most optimal combat doctrine based on faction personality and tactical role
-    pub fn choose_combat_doctrine(personality: &AiPersonality, fleet_role: &str) -> CombatDoctrine {
+    /// Selects the most optimal combat doctrine based on faction personality, cognitive brain, and tactical role
+    pub fn choose_combat_doctrine(
+        personality: &AiPersonality,
+        brain: Option<&crate::ai::brain::AiBrain>,
+        fleet_role: &str,
+    ) -> CombatDoctrine {
+        let agg = brain.map_or(personality.aggression, |b| b.effective_aggression(personality, None));
+        let risk = brain.map_or(personality.risk_tolerance, |b| b.effective_risk_tolerance(personality));
+        let def = brain.map_or(personality.defense_bias, |b| b.effective_defense_bias(personality));
+
         if fleet_role == "Raider" {
             return CombatDoctrine::HitAndRun;
         }
 
-        if fleet_role == "Escort" || personality.defense_bias >= 1.35 {
+        if fleet_role == "Escort" || def >= 1.35 {
             return CombatDoctrine::ScreenEscort;
         }
 
-        if personality.aggression >= 1.45 && personality.risk_tolerance >= 1.20 {
+        if agg >= 1.45 && risk >= 1.20 {
             CombatDoctrine::BrawlingAssault
-        } else if personality.risk_tolerance <= 0.85 {
+        } else if risk <= 0.85 {
             CombatDoctrine::KitingSniper
         } else {
             CombatDoctrine::ScreenEscort

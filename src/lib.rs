@@ -152,6 +152,9 @@ mod tests {
             progress: 1.0, // Instantly arrive
             speed: 100.0,
             mission: factions::FleetMission::Colonization { colony_supplies: 150.0 },
+            role: factions::TaskForceRole::SiegeArmada,
+            doctrine: sim::combat::CombatDoctrine::ScreenEscort,
+            supplies: 100.0,
         });
 
         let events = faction_mgr.tick_strategic_turn(&mut rng, &mut galaxy);
@@ -345,6 +348,7 @@ mod tests {
             &items,
             600.0,
             &empty_in_flight,
+            None,
         );
 
         if let Some(r_a) = route_a {
@@ -360,6 +364,7 @@ mod tests {
                 &items,
                 600.0,
                 &flooded_in_flight,
+                None,
             );
 
             if let Some(r_b) = route_b {
@@ -391,6 +396,105 @@ mod tests {
         assert_eq!(recents.len(), 2);
         assert!(recents[0].contains("[COALITION]"));
         assert!(recents[1].contains("[RAID]"));
+    }
+
+    #[test]
+    fn test_ai_brain_memory_and_dynamic_posture() {
+        let base_personality = ai::personality::AiPersonality::default();
+        let mut brain = ai::brain::AiBrain::new("syndicate_alpha");
+
+        assert_eq!(brain.get_grudge("empire_beta"), 0.0);
+        assert_eq!(brain.get_danger(5), 0.0);
+
+        // Record a defeat
+        brain.record_combat_loss(5, 3, "empire_beta", 10);
+
+        assert!(brain.get_danger(5) > 0.5, "Danger score should increase for planet 5");
+        assert!(brain.get_grudge("empire_beta") > 20.0, "Grudge against rival should increase");
+
+        let eff_risk = brain.effective_risk_tolerance(&base_personality);
+        let eff_def = brain.effective_defense_bias(&base_personality);
+
+        assert!(eff_risk < base_personality.risk_tolerance, "Defeat should lower risk tolerance");
+        assert!(eff_def > base_personality.defense_bias, "Defeat should boost defensive bias");
+
+        // Record a victory
+        brain.record_combat_victory(5, "empire_beta", 15);
+        let eff_agg = brain.effective_aggression(&base_personality, Some("empire_beta"));
+        assert!(eff_agg > base_personality.aggression, "Victory + grudge should increase aggression");
+
+        // Decay over time
+        brain.decay(110); // 100 cycles later
+        assert!(brain.system_danger.get(&5).unwrap() < &1.0, "Danger should decay over time");
+    }
+
+    #[test]
+    fn test_tactical_combat_resolver_with_doctrines() {
+        let mut rng = StdRng::seed_from_u64(42);
+
+        let mut attacker = sim::combat::TacticalFleet::new(
+            "MilitaristEmpire",
+            sim::combat::CombatDoctrine::BrawlingAssault,
+        );
+        attacker.ships.push(sim::combat::ShipClass::battleship("Titan Zero"));
+        attacker.ships.push(sim::combat::ShipClass::cruiser("Vanguard One"));
+
+        let mut defender = sim::combat::TacticalFleet::new(
+            "TradeFederation",
+            sim::combat::CombatDoctrine::KitingSniper,
+        );
+        defender.ships.push(sim::combat::ShipClass::frigate("Escort Alpha"));
+        defender.ships.push(sim::combat::ShipClass::corvette("Scout Beta"));
+
+        let report = sim::combat::TacticalCombatResolver::resolve_battle(&mut attacker, &mut defender, &mut rng);
+
+        assert!(report.rounds_fought >= 1);
+        assert!(report.attacker_damage_dealt > 0.0 || report.defender_damage_dealt > 0.0);
+        assert!(!report.summary.is_empty());
+    }
+
+    #[test]
+    fn test_strategic_ai_targeting_with_brain() {
+        let engine = scripting::ScriptEngine::new();
+        let items = engine.load_items(Path::new("scripts/items.lua")).unwrap();
+        let personalities = engine.load_personalities(Path::new("scripts/ai_personalities.lua")).unwrap();
+
+        let mut rng = StdRng::seed_from_u64(888);
+        let mut galaxy = galaxy::Galaxy::generate_procedural(&mut rng, &items);
+
+        let mut faction_mgr = factions::FactionManager::new();
+        faction_mgr.generate_procedural(&mut rng, 2, &mut galaxy);
+
+        let faction_ids: Vec<String> = faction_mgr.factions.keys().cloned().collect();
+        let f_a = faction_mgr.factions.get(&faction_ids[0]).unwrap();
+        let pers_a = personalities.get("militarist").unwrap();
+
+        let mut brain = ai::brain::AiBrain::new(&f_a.id);
+        // Mark planet 0 as extremely dangerous
+        brain.system_danger.insert(0, 10.0);
+
+        let target_no_brain = ai::strategic_ai::StrategicAi::pick_colonization_target(
+            f_a,
+            pers_a,
+            None,
+            &galaxy,
+            &sim::spatial::SpatialIndex::build(&galaxy.planets.iter().map(|p| p.position).collect::<Vec<_>>()),
+        );
+
+        let target_with_brain = ai::strategic_ai::StrategicAi::pick_colonization_target(
+            f_a,
+            pers_a,
+            Some(&brain),
+            &galaxy,
+            &sim::spatial::SpatialIndex::build(&galaxy.planets.iter().map(|p| p.position).collect::<Vec<_>>()),
+        );
+
+        if let (Some(t_nb), Some(t_wb)) = (target_no_brain, target_with_brain) {
+            // Brain should discourage picking highly dangerous systems
+            if t_nb.0 == 0 {
+                assert_ne!(t_wb.0, 0, "Brain should avoid system 0 due to high danger score");
+            }
+        }
     }
 }
 
