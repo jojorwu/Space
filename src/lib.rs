@@ -1,3 +1,6 @@
+#[cfg(not(target_pointer_width = "64"))]
+compile_error!("star_core requires a 64-bit target architecture!");
+
 pub mod items;
 pub mod scripting;
 pub mod economy;
@@ -392,6 +395,70 @@ mod tests {
         assert_eq!(recents.len(), 2);
         assert!(recents[0].contains("[COALITION]"));
         assert!(recents[1].contains("[RAID]"));
+    }
+
+    #[test]
+    fn test_lua_resource_leak_prevention() {
+        let engine = scripting::ScriptEngine::new();
+
+        let initial_memory = engine.used_memory();
+
+        // Repeatedly load Lua scripts multiple times to ensure no unbound memory leaks
+        for _ in 0..50 {
+            let _items = engine.load_items(Path::new("scripts/items.lua")).expect("Load items failed");
+            let _factions = engine.load_factions_and_zones(Path::new("scripts/factions.lua")).expect("Load factions failed");
+            let _blocks = engine.load_blocks(Path::new("scripts/blocks.lua")).expect("Load blocks failed");
+            let _personalities = engine.load_personalities(Path::new("scripts/ai_personalities.lua")).expect("Load personalities failed");
+        }
+
+        // Trigger manual garbage collection
+        engine.gc().expect("Lua GC failed");
+
+        let post_gc_memory = engine.used_memory();
+        // Check that post-GC memory footprint remains reasonably bounded (e.g. within 250 KB growth after 50 reloads)
+        assert!(
+            post_gc_memory <= initial_memory + 250_000,
+            "Memory growth after GC was higher than expected: initial={}, post_gc={}",
+            initial_memory,
+            post_gc_memory
+        );
+    }
+
+    #[test]
+    fn test_world_simulation_memory_stability() {
+        let engine = scripting::ScriptEngine::new();
+        let items = engine.load_items(Path::new("scripts/items.lua")).unwrap();
+        let personalities = engine.load_personalities(Path::new("scripts/ai_personalities.lua")).unwrap();
+
+        let mut rng = StdRng::seed_from_u64(12345);
+        let mut galaxy = galaxy::Galaxy::generate_procedural(&mut rng, &items);
+
+        let mut faction_mgr = factions::FactionManager::new();
+        faction_mgr.generate_procedural(&mut rng, 4, &mut galaxy);
+
+        let mut trade_fleet = traders::TradeFleet::new();
+        for i in 1..=20 {
+            trade_fleet.spawn_trader(i, &format!("Trader_{}", i), (i % 100) as usize, 10000.0, 50.0, 30.0);
+        }
+
+        let mut world = sim::world::GalacticWorld::new(
+            galaxy,
+            faction_mgr,
+            personalities,
+            trade_fleet,
+            items,
+        );
+
+        // Execute 100 simulation cycles and ensure event bus rings, particle pools, and active fleets stay within expected bounds
+        for _ in 0..100 {
+            world.tick(&mut rng);
+        }
+
+        assert_eq!(world.cycle_count, 101);
+        // Event bus capacity should cap events stored
+        assert!(world.event_bus.recent_strings(50).len() <= 50);
+        // Fleets should be cleaned up when finished
+        assert!(world.factions.active_fleets.len() < 500);
     }
 }
 

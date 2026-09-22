@@ -189,6 +189,16 @@ impl ScriptEngine {
         crate::ai::personality::PersonalityLoader::load_from_lua(&self.lua, path)
     }
 
+    /// Triggers Lua garbage collection cycle to reclaim unused script memory
+    pub fn gc(&self) -> Result<()> {
+        self.lua.gc_collect()
+    }
+
+    /// Returns the total memory allocated by the Lua engine state in bytes
+    pub fn used_memory(&self) -> usize {
+        self.lua.used_memory()
+    }
+
     /// Modding Engine API: Dynamically loads and merges all `.lua` mod files inside a specified `mods/` directory
     pub fn load_mods_from_dir<P: AsRef<Path>>(&self, mods_dir: P) -> Result<usize> {
         let path = mods_dir.as_ref();

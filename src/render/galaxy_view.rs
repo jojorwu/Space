@@ -235,8 +235,9 @@ impl GalaxyRenderer {
             let p_world = Vec2::new(planet.position.x, planet.position.y);
             let p_screen = camera.world_to_screen(p_world);
 
-            if p_screen.x < -60.0 || p_screen.x > screen_width() + 60.0
-                || p_screen.y < -60.0 || p_screen.y > screen_height() + 60.0
+            let margin = 80.0 * camera.zoom.clamp(0.3, 3.0);
+            if p_screen.x < -margin || p_screen.x > sw + margin
+                || p_screen.y < -margin || p_screen.y > sh + margin
             {
                 continue;
             }

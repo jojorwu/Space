@@ -22,6 +22,7 @@ pub struct GalacticWorld {
     pub event_bus: EventBus,
     pub items: HashMap<String, ItemDef>,
     pub cycle_count: usize,
+    cached_faction_ids: Vec<String>,
 }
 
 impl GalacticWorld {
@@ -47,6 +48,7 @@ impl GalacticWorld {
             event_bus,
             items,
             cycle_count: 1,
+            cached_faction_ids: Vec::new(),
         }
     }
 
@@ -146,8 +148,10 @@ impl GalacticWorld {
     }
 
     fn check_fleet_interceptions(&mut self) {
-        let faction_ids: Vec<String> = self.factions.factions.keys().cloned().collect();
-        for f_id in &faction_ids {
+        self.cached_faction_ids.clear();
+        self.cached_faction_ids.extend(self.factions.factions.keys().cloned());
+
+        for f_id in &self.cached_faction_ids {
             let personality = self.get_personality(f_id);
             if let Some(faction) = self.factions.factions.get_mut(f_id) {
                 let events = StrategicAi::check_interception_opportunities(
